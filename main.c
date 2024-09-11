@@ -14,12 +14,15 @@ MODULE_VERSION("0.1");
 static int target_pid = 1234;  // Set the target PID here
 module_param(target_pid, int, 0);
 MODULE_PARM_DESC(target_pid, "Target process ID");
+static int calling_pid = 1234;  // Set the target PID here
+module_param(calling_pid, int, 0);
+MODULE_PARM_DESC(calling_pid, "Calling process ID");
 
 static int __init vma_printer_init(void)
 {
     struct task_struct *task;
     struct vm_area_struct *vma;
-    struct mm_struct *mm;
+    struct mm_struct *mm, *cmm;
 
     printk(KERN_INFO "VMA Printer Module Loaded\n");
     printk(KERN_INFO "Looking for VMAs of process with PID: %d\n", target_pid);
@@ -41,6 +44,14 @@ static int __init vma_printer_init(void)
             for_each_vma(iter, vma) {
                 printk(KERN_INFO "VMA: Start = 0x%lx, End = 0x%lx\n",
                        vma->vm_start, vma->vm_end);
+		for_each_process(task) {
+			if(task->pid == calling_pid) {
+				cmm = task->mm;
+				down_read(&cmm->mmap_lock);
+				insert_vm_struct(cmm, vma);
+				up_read(&cmm->mmap_lock);
+			}
+		}
             }
 
             // Unlock the memory map
