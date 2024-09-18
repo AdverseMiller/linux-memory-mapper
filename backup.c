@@ -9,10 +9,10 @@
 #include <linux/kallsyms.h>
 #include <linux/kprobes.h>
 #include <linux/mman.h>
-#include <linux/pagemap.h>
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("VMA mapper");
+MODULE_AUTHOR("Your Name");
+MODULE_DESCRIPTION("A kernel module to print VMAs of a target process");
 MODULE_VERSION("0.1");
 
 static int target_pid = 1234;  // Set the target PID here
@@ -31,13 +31,14 @@ static struct vm_area_struct *(*orig_vm_area_alloc)(struct mm_struct *mm);
 static struct page *(*orig_follow_page)(struct vm_area_struct *vma, unsigned long address, unsigned int foll_flags);
 
 
+
+
 static int __init vma_printer_init(void)
 {
     struct task_struct *task;
 	struct mm_struct *mm, *cmm;
     struct page *page;
     long unsigned int src_addr, target_addr;
-    unsigned long pfn;
 
     printk(KERN_INFO "VMA Printer Module Loaded\n");
     printk(KERN_INFO "Looking for VMAs of process with PID: %d\n", target_pid);
@@ -51,7 +52,7 @@ static int __init vma_printer_init(void)
 	orig_vm_area_alloc = (struct vm_area_struct *(*)(struct mm_struct *))kallsyms_lookup_name("vm_area_alloc");
     orig_follow_page = (struct page *(*)(struct vm_area_struct *, unsigned long, unsigned int))kallsyms_lookup_name("follow_page");
     if (!orig_insert_vm_struct  || !orig_follow_page || !orig_vm_area_alloc) {
-        printk(KERN_ERR "Failed to resolve all functions\n");
+        printk(KERN_ERR "Failed to find __x64_sys_ptrace\n");
         return -EFAULT;
     }
 	for_each_process(task) {
@@ -65,53 +66,38 @@ static int __init vma_printer_init(void)
 
         vma_iter_init(&iter, mm, 0);
 
-         //example base address, can be changed to pretty much anything
-        
+        unsigned long start = 0x40000000; //example base address, can be changed to pretty much anything
         down_write(&cmm->mmap_lock);
         for_each_vma(iter, vma) {
             struct vm_area_struct *new_vma = orig_vm_area_alloc(mm);
             unsigned long size = vma->vm_end - vma->vm_start;
-            unsigned long start = vma->vm_start + 0x1000000;
+            pr_info("0x%lx\n", vma->vm_start);
             new_vma->vm_start = start;
             new_vma->vm_end = start + size;
             new_vma->vm_mm = cmm;
-            new_vma->vm_pgoff = vma->vm_pgoff;
-            new_vma->vm_ops = vma->vm_ops;
-            
 
-            if(vma->vm_file) { //only add 
-                get_file(vma->vm_file);
-                new_vma->vm_file = vma->vm_file;
-                new_vma->vm_private_data = vma->vm_private_data;
-            } else vma_set_anonymous(new_vma);
-
-            unsigned long new_flags = vma->vm_flags;
-            new_flags &= ~(VM_MAYWRITE); 
-            new_flags |= (VM_SHARED | VM_MIXEDMAP | VM_MAYREAD);     //make remap_pfn_range happy
-            vm_flags_init(new_vma, new_flags);
-            
-
+            vma_set_anonymous(new_vma);
+            vm_flags_init(new_vma, vma->vm_flags | VM_MIXEDMAP);
             new_vma->vm_page_prot = vm_get_page_prot(vma->vm_flags);
 
             // Remap new VMA to point to the existing physical memory
             
             for(src_addr = vma->vm_start, target_addr = start; src_addr < vma->vm_end; src_addr += PAGE_SIZE, target_addr += PAGE_SIZE) {
                 page = orig_follow_page(vma, src_addr, FOLL_GET);
+                
                 if (IS_ERR(page)) {
                     pr_err("Failed to follow page at %lx\n", src_addr);
                     break;  
                 } else
                 if(page) {
-                        pfn = page_to_pfn(page);
-                        int ret = remap_pfn_range(new_vma, target_addr, pfn, PAGE_SIZE, vma->vm_page_prot); 
-                        if(ret) {
-                            pr_err("remap_pfn_range failed too, something is seriously fucked up\n");
-                            pr_err("Bailing out on this VMA...\n");
-                            break;
-                        }
+                    int ret = vm_insert_page(new_vma, target_addr, page);
+                    if(ret) pr_err("Failed to map page\n");
+                    break;
                 }
-                put_page(page);
-            }            
+            }
+
+            start+=size; //increase offset
+            
             printk(KERN_INFO "VMA: Old = 0x%lx, New = 0x%lx\n", vma->vm_start, new_vma->vm_start);
 
             if (orig_insert_vm_struct(cmm, new_vma)) {
