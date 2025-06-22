@@ -10,6 +10,7 @@
 #include <linux/kprobes.h>
 #include <linux/mman.h>
 #include <linux/pagemap.h>
+#include <linux/kthread.h>
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("VMA mapper");
@@ -22,106 +23,73 @@ static int calling_pid = 1234;  // Set the target PID here
 module_param(calling_pid, int, 0);
 MODULE_PARM_DESC(calling_pid, "Target process ID");
 
-static struct kprobe kp = {
-    .symbol_name = "kallsyms_lookup_name"
-};
-
-static int (*orig_insert_vm_struct)(struct mm_struct *, struct vm_area_struct *);
-static struct vm_area_struct *(*orig_vm_area_alloc)(struct mm_struct *mm);
-static struct page *(*orig_follow_page)(struct vm_area_struct *vma, unsigned long address, unsigned int foll_flags);
-
 
 static int __init vma_printer_init(void)
 {
-    struct task_struct *task;
+    	struct task_struct *task;
 	struct mm_struct *mm, *cmm;
-    struct page *page;
-    long unsigned int src_addr, target_addr;
-    unsigned long pfn;
+    	struct page *page;
 
-    printk(KERN_INFO "VMA Printer Module Loaded\n");
-    printk(KERN_INFO "Looking for VMAs of process with PID: %d\n", target_pid);
-    typedef unsigned long (*kallsyms_lookup_name_t)(const char *name);
-    kallsyms_lookup_name_t kallsyms_lookup_name;
-    register_kprobe(&kp);
-    kallsyms_lookup_name = (kallsyms_lookup_name_t) kp.addr;
-    unregister_kprobe(&kp);
-
-    orig_insert_vm_struct = (int (*)(struct mm_struct *, struct vm_area_struct *))kallsyms_lookup_name("insert_vm_struct");
-	orig_vm_area_alloc = (struct vm_area_struct *(*)(struct mm_struct *))kallsyms_lookup_name("vm_area_alloc");
-    orig_follow_page = (struct page *(*)(struct vm_area_struct *, unsigned long, unsigned int))kallsyms_lookup_name("follow_page");
-    if (!orig_insert_vm_struct  || !orig_follow_page || !orig_vm_area_alloc) {
-        printk(KERN_ERR "Failed to resolve all functions\n");
-        return -EFAULT;
-    }
+    	printk(KERN_INFO "VMA Printer Module Loaded\n");
+    	printk(KERN_INFO "Looking for VMAs of process with PID: %d\n", target_pid);
 	for_each_process(task) {
 		if(task->pid == target_pid)  mm = task->mm;
 		if(task->pid == calling_pid) cmm = task->mm;
 	}
-
-	if(mm && cmm) {
-        struct vm_area_struct *vma;
-        VMA_ITERATOR(iter, mm, 0);  
-
-        vma_iter_init(&iter, mm, 0);
-
-         //example base address, can be changed to pretty much anything
-        
-        down_write(&cmm->mmap_lock);
-        for_each_vma(iter, vma) {
-            struct vm_area_struct *new_vma = orig_vm_area_alloc(mm);
-            unsigned long size = vma->vm_end - vma->vm_start;
-            unsigned long start = vma->vm_start + 0x1000000;
-            new_vma->vm_start = start;
-            new_vma->vm_end = start + size;
-            new_vma->vm_mm = cmm;
-            new_vma->vm_pgoff = vma->vm_pgoff;
-            new_vma->vm_ops = vma->vm_ops;
-            
-
-            if(vma->vm_file) { //only add 
-                get_file(vma->vm_file);
-                new_vma->vm_file = vma->vm_file;
-                new_vma->vm_private_data = vma->vm_private_data;
-            } else vma_set_anonymous(new_vma);
-
-            unsigned long new_flags = vma->vm_flags;
-            new_flags &= ~(VM_MAYWRITE); 
-            new_flags |= (VM_SHARED | VM_MIXEDMAP | VM_MAYREAD);     //make remap_pfn_range happy
-            vm_flags_init(new_vma, new_flags);
-            
-
-            new_vma->vm_page_prot = vm_get_page_prot(vma->vm_flags);
-
-            // Remap new VMA to point to the existing physical memory
-            
-            for(src_addr = vma->vm_start, target_addr = start; src_addr < vma->vm_end; src_addr += PAGE_SIZE, target_addr += PAGE_SIZE) {
-                page = orig_follow_page(vma, src_addr, FOLL_GET);
-                if (IS_ERR(page)) {
-                    pr_err("Failed to follow page at %lx\n", src_addr);
-                    break;  
-                } else
-                if(page) {
-                        pfn = page_to_pfn(page);
-                        int ret = remap_pfn_range(new_vma, target_addr, pfn, PAGE_SIZE, vma->vm_page_prot); 
-                        if(ret) {
-                            pr_err("remap_pfn_range failed too, something is seriously fucked up\n");
-                            pr_err("Bailing out on this VMA...\n");
-                            break;
-                        }
-                }
-                put_page(page);
-            }            
-            printk(KERN_INFO "VMA: Old = 0x%lx, New = 0x%lx\n", vma->vm_start, new_vma->vm_start);
-
-            if (orig_insert_vm_struct(cmm, new_vma)) {
-                pr_err("Failed to insert the new new_vma into the process memory map\n");
-                kfree(new_vma);
-            }
-        }
-        up_write(&cmm->mmap_lock);
-    
-    }
+	if (mm && cmm) {
+	    	struct vm_area_struct *vma;
+		struct mm_struct *old_mm;
+	    	VMA_ITERATOR(iter, mm, 0);
+	
+	    /* grab both maps */
+	    	down_read (&mm->mmap_lock);
+	
+		for_each_vma(iter, vma) {
+		        unsigned long start  = vma->vm_start;
+		        unsigned long len    = vma->vm_end   - start;
+		        unsigned long prot   = 0;
+		        unsigned long flags  = MAP_FIXED;
+		        unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
+		        unsigned long new_start;
+		
+		        if (vma->vm_flags & VM_READ)  prot |= PROT_READ;
+		        if (vma->vm_flags & VM_WRITE) prot |= PROT_WRITE;
+		        if (vma->vm_flags & VM_EXEC)  prot |= PROT_EXEC;
+		
+			if (vma->vm_file) {
+		        	flags |= (vma->vm_flags & VM_SHARED) ? MAP_SHARED : MAP_PRIVATE;
+			} else flags |= MAP_ANONYMOUS | MAP_SHARED;
+		    	
+		
+		
+		        /* switch into cmm’s mm and call vm_mmap() */
+			old_mm = current->mm;
+		        current->mm   = cmm;
+			new_start     = vm_mmap(vma->vm_file,  start, len, prot, flags, offset);
+			current->mm = old_mm;
+		        if (IS_ERR_VALUE(new_start)) pr_err("vma_printer: vm_mmap failed @%lx len=%lu: %ld\n", start, len, new_start);
+		        else pr_info("vma_printer: mapped %lx–%lx\n", new_start, new_start + len);
+			down_read(&cmm->mmap_lock);
+			struct vm_area_struct *new_vma = find_vma(cmm, new_start);
+			up_read(&cmm->mmap_lock);
+		
+		      /* only do PFN‐remap for anon regions */
+			if (!vma->vm_file && new_vma) {
+				long got = get_user_pages_remote(mm, vma->vm_start, 1, FOLL_GET, &page, NULL);
+		        	if (got <= 0) {
+		        		pr_err("pin failed @%lx: %ld\n", vma->vm_start, got);
+		        		continue;
+		        	}
+				down_write(&cmm->mmap_lock);
+				got = remap_pfn_range(new_vma, new_vma->vm_start, page_to_pfn(page), vma->vm_end - vma->vm_start, new_vma->vm_page_prot);
+		        	if(got < 0) pr_err("remap failed: %ld\n", got);
+				put_page(page);
+				up_write(&cmm->mmap_lock);
+			}
+		}
+	
+	    up_read(&mm->mmap_lock);
+	}
 
     return 0;
 }
