@@ -41,7 +41,7 @@ static int __init vma_printer_init(void)
 		struct mm_struct *old_mm;
 	    	VMA_ITERATOR(iter, mm, 0);
 	
-	    /* grab both maps */
+	    
 	    	down_read (&mm->mmap_lock);
 	
 		for_each_vma(iter, vma) {
@@ -62,7 +62,7 @@ static int __init vma_printer_init(void)
 		    	
 		
 		
-		        /* switch into cmm’s mm and call vm_mmap() */
+		        //switch into calling process' address space and mmap a new VMA
 			old_mm = current->mm;
 		        current->mm   = cmm;
 			new_start     = vm_mmap(vma->vm_file,  start, len, prot, flags, offset);
@@ -73,7 +73,7 @@ static int __init vma_printer_init(void)
 			struct vm_area_struct *new_vma = find_vma(cmm, new_start);
 			up_read(&cmm->mmap_lock);
 		
-		      /* only do PFN‐remap for anon regions */
+		      	//do not remap file-backed regions
 			if (!vma->vm_file && new_vma) {
 				long got = get_user_pages_remote(mm, vma->vm_start, 1, FOLL_GET, &page, NULL);
 		        	if (got <= 0) {
