@@ -11,5 +11,3 @@ all:
 
 clean:
 	$(MAKE) -C $(KDIR) M=$(PWD) clean
-vm:
-	$(MAKE) -C /lib/modules/6.10.7-arch1-1/build  M=$(PWD) modules
