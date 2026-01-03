@@ -10,7 +10,7 @@ Important: mappings are tracked per open file descriptor. When the `/dev/map` fd
 - `insmod main.ko`
 
 ## Usage
-- open `/dev/map`, write `<pid>\n`, and keep the fd open during use.
+- open `/dev/map`, write `<pid>\n`, and keep the fd open during use. Close the fd once done.
 
 ## Some Caveats
 - This module is intentionally unsafe; it uses `MAP_FIXED` and can overwrite existing mappings in the calling process, potentially crashing it. It is recommended that the calling process binary is built statically to keep the amount of potential VMA collisions to a minimum
