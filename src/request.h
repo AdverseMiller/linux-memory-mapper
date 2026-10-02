@@ -38,8 +38,7 @@ struct map_bind_request {
 };
 
 void map_selector_reset(struct map_selector *sel);
-bool map_selector_matches(const struct map_selector *sel, unsigned long vma_idx,
-			  unsigned long start, unsigned long end);
+bool map_selector_matches(const struct map_selector *sel, unsigned long vma_idx, unsigned long start, unsigned long end);
 int parse_map_request(char *spec, struct map_request *req);
 int parse_bind_request(char *spec, struct map_bind_request *req);
 

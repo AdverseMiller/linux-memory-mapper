@@ -4,7 +4,6 @@
 
 struct vm_area_struct;
 
-void log_vma_failure(const char *stage, const struct vm_area_struct *vma,
-		     unsigned long start, unsigned long len, long err);
+void log_vma_failure(const char *stage, const struct vm_area_struct *vma, unsigned long start, unsigned long len, long err);
 
 #endif

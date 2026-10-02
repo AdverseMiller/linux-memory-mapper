@@ -40,11 +40,9 @@ void map_session_get(struct map_session *s);
 void map_session_put(struct map_session *s);
 int session_cleanup_current(struct map_session *s);
 int session_bind_target(struct map_session *s, pid_t target_pid);
-int session_add_region(struct map_session *s, unsigned long start,
-		       unsigned long len);
+int session_add_region(struct map_session *s, unsigned long start, unsigned long len);
 /* The caller holds s->lock when transferring pinned page references. */
-int session_add_pinned_pages(struct map_session *s, struct page **pages,
-			     unsigned long npages);
+int session_add_pinned_pages(struct map_session *s, struct page **pages, unsigned long npages);
 int session_track_pinned_page(struct map_session *s, struct page *page);
 
 #endif
