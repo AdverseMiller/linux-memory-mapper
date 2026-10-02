@@ -1,13 +1,10 @@
-obj-m += main.o
-
 # Path to the Linux kernel source directory
-KDIR := /lib/modules/$(shell uname -r)/build
+KDIR ?= /lib/modules/$(shell uname -r)/build
 
-# Current directory
-PWD := $(shell pwd)
-
+.PHONY: all clean
 all:
-	$(MAKE) -C $(KDIR) M=$(PWD) modules
+	$(MAKE) -C $(KDIR) M=$(CURDIR)/src modules
 
 clean:
-	$(MAKE) -C $(KDIR) M=$(PWD) clean
+	$(MAKE) -C $(KDIR) M=$(CURDIR)/src clean
+	if [ -f src/tests/Makefile ]; then $(MAKE) -C src/tests KDIR=$(KDIR) clean; fi

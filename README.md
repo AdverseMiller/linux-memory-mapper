@@ -4,10 +4,29 @@ A kernel module that maps the VMAs of a target process into the calling process,
 ## Interface
 The module exposes `/dev/map` and enforces access in `open`/`write` (root or the configured allowlisted UID). A userspace process opens `/dev/map` and writes a mapping request. The target process is then mapped into the *calling process* (the process that performed the write).
 
-Important: mappings are tracked per open file descriptor. When the `/dev/map` fd is closed, the module unmaps anything it created and releases pinned pages. If you want “live” mappings, your process must keep the fd open.
+Mappings belong to the address space that opened `/dev/map`. Duplicated, inherited, or passed descriptors share that session; only the opener's address space may write mapping requests. The final close removes the session's mappings from the opener, even when another process closes the last descriptor. Anonymous PFN mappings are not inherited by `fork()`.
+
+The file and anonymous VMAs hold session references, and the VMAs also pin the module. Page references are released after the mappings have been removed. If unmapping fails, surviving VMAs retain those references until they are destroyed. The session does not keep the opener's address space alive after exit or exec.
 
 ## Loading
-- `insmod main.ko`
+- `insmod src/main.ko`
+
+Build against the running kernel with `make`. For a kernel built with Clang/LLVM, use `make LLVM=1 W=1` (the build tree is selected through `/lib/modules/$(uname -r)/build`; `KDIR` can override it).
+
+## Source layout
+
+The root Makefile builds a single `src/main.ko` module from the components listed in `src/Kbuild`.
+
+| Files | Responsibility |
+| --- | --- |
+| `src/module.c` | Module startup, shutdown, and metadata |
+| `src/device.c`, `src/device.h` | `/dev/map` registration and file operations |
+| `src/access.c`, `src/access.h` | Caller authorization and self-target checks |
+| `src/request.c`, `src/request.h` | Request parsing and VMA selectors |
+| `src/mapping.c`, `src/mapping.h` | Target VMA traversal and eager/file mapping |
+| `src/anon.c`, `src/anon.h` | Anonymous VMA references and lazy page faults |
+| `src/session.c`, `src/session.h` | Session ownership, target binding, pinned pages, and cleanup |
+| `src/diagnostics.c`, `src/diagnostics.h` | Mapping failure logs |
 
 ## Usage
 - open `/dev/map`, write one of the following request formats, and keep the fd open during use:

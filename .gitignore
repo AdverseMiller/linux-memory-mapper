@@ -3,4 +3,10 @@
 *.symvers
 *.ko
 *.order
+.*.cmd
+*.out
+__pycache__/
 
+# Local reports and regression fixtures are kept outside the upstream source.
+/bugs.txt
+/src/tests/

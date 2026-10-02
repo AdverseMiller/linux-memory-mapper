@@ -1,0 +1,2 @@
+obj-m += main.o
+main-y := module.o device.o access.o request.o mapping.o anon.o session.o diagnostics.o
